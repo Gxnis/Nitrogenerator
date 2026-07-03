@@ -1,0 +1,253 @@
+<!-- Discord Nitro Generator - HTML/JS версия -->
+<!-- Работает прямо в браузере, требуется CORS-прокси -->
+<!-- Сохраните как dng.html и откройте в Chrome/Firefox -->
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DNG - Discord Nitro Generator</title>
+    <style>
+        body {
+            background: #0a0a0a;
+            color: #e0e0e0;
+            font-family: 'Courier New', monospace;
+            padding: 10px;
+            margin: 0;
+        }
+        .ascii {
+            color: #00ffff;
+            white-space: pre;
+            font-size: 12px;
+            line-height: 1;
+        }
+        .stats {
+            margin: 10px 0;
+        }
+        .stats span {
+            margin-right: 20px;
+            font-weight: bold;
+        }
+        .red { color: #ff4444; }
+        .yellow { color: #ffaa00; }
+        .green { color: #00ff00; }
+        .cyan { color: #00ffff; }
+        .valid-list {
+            background: #111;
+            padding: 10px;
+            border: 1px solid #00ff00;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+        .valid-list div {
+            color: #00ff00;
+            font-family: monospace;
+        }
+        .controls {
+            margin: 10px 0;
+        }
+        .controls label {
+            display: inline-block;
+            width: 120px;
+        }
+        input, textarea, button {
+            background: #222;
+            color: #ddd;
+            border: 1px solid #555;
+            padding: 3px 8px;
+            font-family: monospace;
+        }
+        button {
+            cursor: pointer;
+            background: #004466;
+            border-color: #0088cc;
+            font-weight: bold;
+        }
+        button:hover { background: #005577; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="ascii" id="logo">
+        <!-- ASCII арт вставится через JS -->
+    </div>
+
+    <div class="stats">
+        <span class="red" id="invalid">НЕДЕЙСТВИТЕЛЬНЫХ: 0</span>
+        <span class="yellow" id="used">УЖЕ ИСПОЛЬЗОВАНЫ: 0</span>
+        <span class="green" id="valid">ВАЛИДНЫХ: 0</span>
+    </div>
+    <div class="cyan">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+    <div class="valid-list" id="validList">
+        <div>Валидные коды появятся здесь...</div>
+    </div>
+    <div class="controls">
+        <label for="threads">Потоков (запросов/сек):</label>
+        <input type="number" id="threads" value="10" min="1" max="50"><br>
+        <label for="proxyInput">Прокси (ip:port, по одному на строку):</label><br>
+        <textarea id="proxyInput" rows="5" cols="40" placeholder="127.0.0.1:8080"></textarea><br>
+        <label for="corsProxy">CORS-прокси URL:</label>
+        <input type="text" id="corsProxy" value="https://api.allorigins.win/raw?url=" size="40"><br>
+        <label for="webhookUrl">Discord Webhook URL:</label>
+        <input type="text" id="webhookUrl" size="40" placeholder="https://discord.com/api/webhooks/..."><br>
+        <button id="startBtn">▶ Старт</button>
+        <button id="stopBtn" disabled>⏹ Стоп</button>
+    </div>
+
+    <script>
+        // ==================== НАСТРОЙКИ (изменяемые через интерфейс) ====================
+        // Статические ASCII логотип
+        const asciiArt = `
+ ██████╗ ███╗   ██╗ ██████╗ 
+ ██╔══██╗████╗  ██║██╔════╝            ~ Discord Nitro Generator ~
+ ██║  ██║██╔██╗ ██║██║  ███╗     
+ ██║  ██║██║╚██╗██║██║   ██║     HTML/JS (Browser)
+ ██████╔╝██║ ╚████║╚██████╔╝ 
+ ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝ `;
+        document.getElementById('logo').textContent = asciiArt;
+
+        // Глобальные переменные
+        let invalidCount = 0;
+        let usedCount = 0;
+        let validCount = 0;
+        const validCodes = []; // массив валидных кодов
+        let running = false;
+        let intervalId = null;
+
+        // DOM элементы
+        const elInvalid = document.getElementById('invalid');
+        const elUsed = document.getElementById('used');
+        const elValid = document.getElementById('valid');
+        const elValidList = document.getElementById('validList');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const threadsInput = document.getElementById('threads');
+        const proxyInput = document.getElementById('proxyInput');
+        const corsProxyInput = document.getElementById('corsProxy');
+        const webhookUrlInput = document.getElementById('webhookUrl');
+
+        // Функция генерации случайного кода (16 символов)
+        function generateCode() {
+            const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let code = '';
+            for (let i = 0; i < 16; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return code;
+        }
+
+        // Функция обновления интерфейса (счетчики и список)
+        function updateUI() {
+            elInvalid.textContent = `НЕДЕЙСТВИТЕЛЬНЫХ: ${invalidCount}`;
+            elUsed.textContent = `УЖЕ ИСПОЛЬЗОВАНЫ: ${usedCount}`;
+            elValid.textContent = `ВАЛИДНЫХ: ${validCount}`;
+            // Обновляем список валидных кодов
+            elValidList.innerHTML = '';
+            if (validCodes.length === 0) {
+                elValidList.innerHTML = '<div>Нет валидных кодов.</div>';
+            } else {
+                validCodes.forEach(code => {
+                    const div = document.createElement('div');
+                    div.textContent = `[ ВАЛИДНЫЙ ] discord.gift/${code}`;
+                    elValidList.appendChild(div);
+                });
+            }
+        }
+
+        // Функция отправки вебхука (через CORS-прокси или без)
+        function sendWebhook(code) {
+            const webhookUrl = webhookUrlInput.value.trim();
+            if (!webhookUrl) return;
+            const payload = {
+                content: `||@here|| **__New Valid Nitro !!__**\n\nhttps://discord.gift/${code}`,
+                username: "DNG",
+                avatar_url: ""
+            };
+            fetch(webhookUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).catch(e => console.log('Ошибка вебхука:', e));
+        }
+
+        // Основная функция проверки одного кода
+        async function checkCode(code, proxy) {
+            const corsProxy = corsProxyInput.value.trim();
+            const url = `https://discordapp.com/api/v6/entitlements/gift-codes/${code}?with_application=false&with_subscription_plan=true`;
+            let proxyUrl = corsProxy ? corsProxy + encodeURIComponent(url) : url;
+
+            const fetchOptions = {
+                method: 'GET',
+                mode: 'cors', // обязательно для CORS-прокси
+                headers: { 'Accept': 'application/json' }
+            };
+
+            try {
+                const response = await fetch(proxyUrl, fetchOptions);
+                const status = response.status;
+                if (status === 200) {
+                    validCount++;
+                    validCodes.push(code);
+                    updateUI();
+                    sendWebhook(code);
+                    // Также можно сохранить локально через Blob, но не будем усложнять
+                } else if (status === 404) {
+                    invalidCount++;
+                } else if (status === 429) {
+                    usedCount++;
+                } else {
+                    invalidCount++;
+                }
+                updateUI();
+            } catch (e) {
+                // Ошибка сети/прокси считаем недействительным
+                invalidCount++;
+                updateUI();
+            }
+        }
+
+        // Функция одного цикла: запускает указанное количество проверок
+        function runBatch() {
+            const numThreads = parseInt(threadsInput.value) || 10;
+            // Загружаем список прокси из textarea (каждая строка - прокси)
+            const proxies = proxyInput.value.split('\n').map(s => s.trim()).filter(s => s !== '');
+            // Если прокси нет, просто делаем запросы без прокси (через cors прокси)
+            for (let i = 0; i < numThreads; i++) {
+                const code = generateCode();
+                const proxy = proxies.length > 0 ? proxies[Math.floor(Math.random() * proxies.length)] : null;
+                // Запускаем проверку без блокировки (асинхронно)
+                checkCode(code, proxy);
+            }
+        }
+
+        // Запуск генератора
+        function start() {
+            if (running) return;
+            running = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            // Используем setInterval для периодического запуска batch
+            intervalId = setInterval(runBatch, 200); // каждые 200 мс
+            runBatch(); // первый запуск сразу
+        }
+
+        // Остановка генератора
+        function stop() {
+            if (!running) return;
+            running = false;
+            clearInterval(intervalId);
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+
+        // Привязка событий
+        startBtn.addEventListener('click', start);
+        stopBtn.addEventListener('click', stop);
+
+        // Первоначальная отрисовка
+        updateUI();
+    </script>
+</body>
+</html>
